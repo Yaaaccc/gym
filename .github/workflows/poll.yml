@@ -2,7 +2,7 @@ name: 记录实时人数
 
 on:
   schedule:
-    - cron: "*/5 * * * *" # 每 5 分钟一次;想改频率改这里,如 */15
+    - cron: "*/5 * * * *" # GitHub 最快 5 分钟一次;30 秒粒度由 poll.py 在任务内循环实现
   workflow_dispatch: # 允许在 Actions 页面手动触发
 
 permissions:
@@ -15,7 +15,7 @@ concurrency:
 jobs:
   poll:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
