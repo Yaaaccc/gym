@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>虾健健 · 实时人数</title>
+<script src="https://cdn.bootcdn.net/ajax/libs/echarts/5.5.1/echarts.min.js"></script>
+<script>window.echarts || document.write('<script src="https://unpkg.com/echarts@5.5.1/dist/echarts.min.js"><\/script>')</script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: #f5f7fa; color: #1f2937; padding: 20px 14px 40px;
+  }
+  .wrap { max-width: 920px; margin: 0 auto; }
+  header { margin-bottom: 16px; }
+  header h1 { font-size: 22px; }
+  header .sub { color: #6b7280; font-size: 13px; margin-top: 4px; }
+  .cards { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap: 10px; margin-bottom: 14px; }
+  .card {
+    background: #fff; border-radius: 14px; padding: 14px 16px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.06);
+  }
+  .card .label { font-size: 12px; color: #6b7280; margin-bottom: 6px; }
+  .card.hero { background: linear-gradient(135deg, #10b981, #059669); color: #fff; }
+  .card.hero .label { color: rgba(255,255,255,.85); }
+  .card.hero .big { font-size: 44px; font-weight: 700; line-height: 1.1; }
+  .card.hero .big small { font-size: 16px; font-weight: 400; margin-left: 4px; }
+  .card.hero .upd { font-size: 11px; color: rgba(255,255,255,.8); margin-top: 6px; }
+  .card .mid { font-size: 22px; font-weight: 600; }
+  .toolbar { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; align-items: center; }
+  .toolbar button {
+    border: 1px solid #d1d5db; background: #fff; color: #374151; border-radius: 999px;
+    padding: 6px 16px; font-size: 13px; cursor: pointer;
+  }
+  .toolbar button.active { background: #1f2937; color: #fff; border-color: #1f2937; }
+  .toolbar .hint { font-size: 12px; color: #9ca3af; margin-left: auto; }
+  .panel { background: #fff; border-radius: 14px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.06); margin-bottom: 14px; }
+  .panel h3 { font-size: 14px; color: #374151; margin-bottom: 8px; }
+  #chart1 { height: 340px; }
+  #chart2 { height: 240px; }
+  .empty { text-align: center; color: #9ca3af; padding: 60px 0; font-size: 14px; }
+  footer { text-align: center; color: #9ca3af; font-size: 12px; margin-top: 8px; line-height: 1.8; }
+  @media (max-width: 640px) {
+    .cards { grid-template-columns: 1fr 1fr; }
+    .card.hero { grid-column: 1 / -1; }
+    #chart1 { height: 280px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>🏋️ 虾健健 24H · 实时人数</h1>
+    <div class="sub">南京仙林大学城店(SZY00087)· GitHub Actions 每 5 分钟自动记录</div>
+  </header>
+
+  <div class="cards">
+    <div class="card hero">
+      <div class="label">当前在店</div>
+      <div class="big"><span id="cur">--</span><small>人</small></div>
+      <div class="upd" id="upd">加载中…</div>
+    </div>
+    <div class="card"><div class="label">今日峰值</div><div class="mid" id="peak">--</div></div>
+    <div class="card"><div class="label">温度</div><div class="mid" id="temp">--</div></div>
+    <div class="card"><div class="label">湿度</div><div class="mid" id="hum">--</div></div>
+  </div>
+
+  <div class="toolbar" id="ranges">
+    <button data-range="today" class="active">今天</button>
+    <button data-range="7d">近 7 天</button>
+    <button data-range="30d">近 30 天</button>
+    <button data-range="all">全部</button>
+    <span class="hint">每 5 分钟自动刷新</span>
+  </div>
+
+  <div class="panel">
+    <div id="chart1"></div>
+    <div class="empty" id="empty" style="display:none">还没有数据,等 GitHub Actions 跑一次后再刷新页面</div>
+  </div>
+
+  <div class="panel">
+    <h3>🌡️ 店内环境</h3>
+    <div id="chart2"></div>
+  </div>
+
+  <footer>
+    数据来源:虾健健小程序公开接口 · 由 GitHub Actions 自动采集<br>
+    仅用于个人观察客流,请勿公开传播数据
+  </footer>
+</div>
+
+<script>
+(function () {
+  var $ = function (s) { return document.querySelector(s); };
+  var range = 'today';
+  var recent = [];
+  var full = null;
+  var chart1 = echarts.init($('#chart1'));
+  var chart2 = echarts.init($('#chart2'));
+
+  function pad(n) { return String(n).padStart(2, '0'); }
+  function fmt(d) {
+    var sameDay = d.toDateString() === new Date().toDateString();
+    return sameDay
+      ? pad(d.getHours()) + ':' + pad(d.getMinutes())
+      : (d.getMonth() + 1) + '/' + d.getDate() + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+  }
+  function startOfToday() { var d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime(); }
+
+  function loadRecent() {
+    return fetch('data/recent.json?t=' + Date.now())
+      .then(function (r) { return r.ok ? r.json() : []; })
+      .then(function (arr) { if (Array.isArray(arr)) recent = arr; })
+      .catch(function () {});
+  }
+  function loadFull() {
+    if (full) return Promise.resolve();
+    return fetch('data/history.jsonl?t=' + Date.now())
+      .then(function (r) { return r.ok ? r.text() : ''; })
+      .then(function (txt) {
+        full = txt.split('\n').filter(function (l) { return l.trim(); })
+          .map(function (l) { try { return JSON.parse(l); } catch (e) { return null; } })
+          .filter(Boolean);
+      })
+      .catch(function () { full = []; });
+  }
+
+  function currentData() {
+    if (range === 'all') return full || recent;
+    if (range === 'today') return recent.filter(function (r) { return new Date(r.ts).getTime() >= startOfToday(); });
+    var days = range === '7d' ? 7 : 30;
+    return recent.filter(function (r) { return new Date(r.ts).getTime() >= Date.now() - days * 864e5; });
+  }
+
+  function render() {
+    var data = currentData();
+    var valid = data.filter(function (r) { return r.count != null; });
+    var last = valid[valid.length - 1];
+
+    if (last) {
+      $('#cur').textContent = last.count;
+      $('#upd').textContent = '更新于 ' + fmt(new Date(last.ts));
+      $('#temp').textContent = last.temp != null ? last.temp + '℃' : '--';
+      $('#hum').textContent = last.humidity != null ? last.humidity + '%' : '--';
+    } else {
+      $('#cur').textContent = '--';
+      $('#upd').textContent = '暂无数据';
+    }
+    var todayValid = recent.filter(function (r) { return r.count != null && new Date(r.ts).getTime() >= startOfToday(); });
+    $('#peak').textContent = todayValid.length ? Math.max.apply(null, todayValid.map(function (r) { return r.count; })) + ' 人' : '--';
+
+    $('#empty').style.display = valid.length ? 'none' : 'block';
+
+    var areaColor = new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+      { offset: 0, color: 'rgba(16,185,129,.28)' },
+      { offset: 1, color: 'rgba(16,185,129,0)' }
+    ]);
+    chart1.setOption({
+      grid: { left: 44, right: 24, top: 42, bottom: 44 },
+      tooltip: {
+        trigger: 'axis',
+        formatter: function (ps) {
+          var p = ps[0];
+          return fmt(new Date(p.value[0])) + '<br/>在店 <b>' + p.value[1] + '</b> 人';
+        }
+      },
+      xAxis: { type: 'time', axisLabel: { hideOverlap: true } },
+      yAxis: { type: 'value', minInterval: 1 },
+      dataZoom: [{ type: 'inside' }],
+      series: [{
+        name: '在店人数', type: 'line', smooth: true, showSymbol: valid.length < 60,
+        data: valid.map(function (r) { return [new Date(r.ts).getTime(), r.count]; }),
+        lineStyle: { width: 2.5, color: '#10b981' },
+        itemStyle: { color: '#10b981' },
+        areaStyle: { color: areaColor },
+        markPoint: {
+          symbolSize: 50, itemStyle: { color: '#10b981' },
+          label: { color: '#fff', fontSize: 12 },
+          data: valid.length ? [{ type: 'max', name: '峰值' }] : []
+        }
+      }]
+    }, true);
+
+    var env = data.filter(function (r) { return r.temp != null || r.humidity != null; });
+    chart2.setOption({
+      grid: { left: 44, right: 44, top: 36, bottom: 44 },
+      tooltip: { trigger: 'axis' },
+      legend: { top: 0 },
+      xAxis: { type: 'time', axisLabel: { hideOverlap: true } },
+      yAxis: [
+        { type: 'value', name: '℃', scale: true },
+        { type: 'value', name: '%', max: 100, scale: true }
+      ],
+      series: [
+        {
+          name: '温度', type: 'line', smooth: true, showSymbol: env.length < 60, yAxisIndex: 0,
+          data: env.filter(function (r) { return r.temp != null; })
+            .map(function (r) { return [new Date(r.ts).getTime(), r.temp]; }),
+          lineStyle: { width: 2, color: '#f59e0b' }, itemStyle: { color: '#f59e0b' }
+        },
+        {
+          name: '湿度', type: 'line', smooth: true, showSymbol: env.length < 60, yAxisIndex: 1,
+          data: env.filter(function (r) { return r.humidity != null; })
+            .map(function (r) { return [new Date(r.ts).getTime(), r.humidity]; }),
+          lineStyle: { width: 2, color: '#3b82f6' }, itemStyle: { color: '#3b82f6' }
+        }
+      ]
+    }, true);
+  }
+
+  function refresh() {
+    loadRecent().then(function () {
+      if (range === 'all') { loadFull().then(render); } else { render(); }
+    });
+  }
+
+  document.getElementById('ranges').addEventListener('click', function (e) {
+    var btn = e.target.closest('button');
+    if (!btn) return;
+    document.querySelectorAll('#ranges button').forEach(function (b) { b.classList.remove('active'); });
+    btn.classList.add('active');
+    range = btn.dataset.range;
+    if (range === 'all') { loadFull().then(render); } else { render(); }
+  });
+
+  window.addEventListener('resize', function () { chart1.resize(); chart2.resize(); });
+  refresh();
+  setInterval(refresh, 5 * 60 * 1000);
+})();
+</script>
+</body>
+</html>
