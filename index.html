@@ -71,7 +71,7 @@
     <button data-range="7d">近 7 天</button>
     <button data-range="30d">近 30 天</button>
     <button data-range="all">全部</button>
-    <span class="hint">每 2 分钟自动刷新</span>
+    <span class="hint">当前人数实时直读 · 曲线每 2 分钟更新</span>
   </div>
 
   <div class="panel">
@@ -98,6 +98,8 @@
   var full = null;
   var chart1 = echarts.init($('#chart1'));
   var chart2 = echarts.init($('#chart2'));
+  var API_URL = 'https://xjj.cpc-api.fitron.vip/v1/user/stores/SZY00087/live-status';
+  var lastLiveOk = 0; // 最近一次实时直读成功的时间
 
   function pad(n) { return String(n).padStart(2, '0'); }
   function fmt(d) {
@@ -138,7 +140,9 @@
     var valid = data.filter(function (r) { return r.count != null; });
     var last = valid[valid.length - 1];
 
-    if (last) {
+    if (Date.now() - lastLiveOk < 90 * 1000) {
+      // 实时直读正常,hero 卡片交给 liveTick 维护,这里不覆盖
+    } else if (last) {
       $('#cur').textContent = last.count;
       $('#upd').textContent = '更新于 ' + fmt(new Date(last.ts));
       $('#temp').textContent = last.temp != null ? last.temp + '℃' : '--';
@@ -215,6 +219,19 @@
     });
   }
 
+  // 实时直读:打开网页时,当前人数/温湿度每 30 秒直接从商家服务器获取
+  function liveTick() {
+    fetch(API_URL).then(function (r) { return r.json(); }).then(function (p) {
+      if (!p || p.code !== 0 || !p.data) return;
+      var env = p.data.environment || {};
+      $('#cur').textContent = p.data.occupancyCount;
+      $('#upd').textContent = '实时 · 刚刚更新';
+      if (env.temperature != null) $('#temp').textContent = env.temperature + '℃';
+      if (env.humidity != null) $('#hum').textContent = env.humidity + '%';
+      lastLiveOk = Date.now();
+    }).catch(function () {});
+  }
+
   document.getElementById('ranges').addEventListener('click', function (e) {
     var btn = e.target.closest('button');
     if (!btn) return;
@@ -225,6 +242,8 @@
   });
 
   window.addEventListener('resize', function () { chart1.resize(); chart2.resize(); });
+  liveTick();
+  setInterval(liveTick, 30 * 1000);
   refresh();
   setInterval(refresh, 2 * 60 * 1000);
 })();
