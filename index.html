@@ -118,7 +118,14 @@
     var sameDay = d.toDateString() === new Date().toDateString();
     return sameDay
       ? pad(d.getHours()) + ':' + pad(d.getMinutes())
-      : (d.getMonth() + 1) + '/' + d.getDate() + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+      : (d.getMonth() + 1) + '/' + d.getDate() + ' 周' + '日一二三四五六'.charAt(d.getDay()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+  }
+  function dayAxisLabel(v) {
+    var d = new Date(v);
+    if (d.getHours() === 0 && d.getMinutes() === 0) {
+      return (d.getMonth() + 1) + '-' + pad(d.getDate()) + '\n周' + '日一二三四五六'.charAt(d.getDay());
+    }
+    return pad(d.getHours()) + ':' + pad(d.getMinutes());
   }
   function startOfToday() { var d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime(); }
 
@@ -241,15 +248,22 @@
         trigger: 'axis',
         formatter: function (ps) {
           if (!ps.length) return '';
-          var html = fmt(new Date(ps[0].value[0]));
+          var html = [];
           for (var i = 0; i < ps.length; i++) {
-            html += '<br/>' + ps[i].marker + ps[i].seriesName + ' <b>' + ps[i].value[1] + '</b> 人';
+            var t = ps[i].value[0];
+            var name = ps[i].seriesName;
+            var when;
+            if (name === '上周同期') { when = fmt(new Date(t - 7 * 864e5)); }
+            else if (/^\d{2}-\d{2}/.test(name)) { when = name + ' ' + pad(new Date(t).getHours()) + ':' + pad(new Date(t).getMinutes()); }
+            else { when = fmt(new Date(t)); }
+            if (i === 0) html.push(when);
+            html.push(ps[i].marker + name + ' <b>' + ps[i].value[1] + '</b> 人');
           }
-          return html;
+          return html.join('<br/>');
         }
       },
       xAxis: {
-        type: 'time', axisLabel: { hideOverlap: true },
+        type: 'time', axisLabel: { hideOverlap: true, formatter: dayAxisLabel },
         min: fixedDay ? new Date(todayKey + 'T00:00:00+08:00').getTime() : null,
         max: fixedDay ? new Date(todayKey + 'T00:00:00+08:00').getTime() + 24 * 3600e3 : null
       },
@@ -263,7 +277,7 @@
       grid: { left: 44, right: 44, top: 36, bottom: 44 },
       tooltip: { trigger: 'axis' },
       legend: { top: 0 },
-      xAxis: { type: 'time', axisLabel: { hideOverlap: true } },
+      xAxis: { type: 'time', axisLabel: { hideOverlap: true, formatter: dayAxisLabel } },
       yAxis: [
         { type: 'value', name: '℃', scale: true },
         { type: 'value', name: '%', max: 100, scale: true }
