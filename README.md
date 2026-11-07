@@ -8,7 +8,7 @@
 
 ## 工作原理
 
-- GitHub Actions 定时器最快只能 5 分钟一次,所以 `.github/workflows/poll.yml` 每 5 分钟触发一次,`poll.py` 在**任务内连续记录 8 条、每 30 秒一条**(约 4 分钟),实现 30 秒粒度;受 GitHub 定时偏差影响,批与批之间偶尔有 5~15 分钟空档。
+- GitHub Actions 定时器最快只能 5 分钟一次且经常不准时,所以 `.github/workflows/poll.yml` 每轮任务内由 `poll.py` **连续记录 8 条、每 30 秒一条**(约 4 分钟),结束时**自动触发下一轮**(定时器仅兜底),批与批之间因此偶尔有小空档。
 - `poll.py` 请求公开接口 `https://xjj.cpc-api.fitron.vip/v1/user/stores/SZY00087/live-status`(无需登录),把 `{时间, 人数, 温度, 湿度}` 写入:
   - `data/history.jsonl` —— 全部历史(30 秒粒度)
   - `data/recent.json` —— 网页用:今天保留全量,更早的按 5 分钟抽稀,最多 30 天
