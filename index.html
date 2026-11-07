@@ -71,6 +71,7 @@
     <button data-range="7d">近 7 天</button>
     <button data-range="30d">近 30 天</button>
     <button data-range="all">全部</button>
+    <button data-range="multi">多日对比</button>
     <button id="cmpBtn">对比上周</button>
     <button id="avgBtn" class="active">历史平均·预测</button>
     <span class="hint">当前人数实时直读 · 曲线每 2 分钟更新</span>
@@ -171,7 +172,13 @@
       { offset: 0, color: 'rgba(16,185,129,.28)' },
       { offset: 1, color: 'rgba(16,185,129,0)' }
     ]);
-    var seriesList = [{
+    var seriesList = [];
+    var todayKey = dateKeyOf(new Date());
+    var fixedDay = (range === 'today' || range === 'multi');
+    if (range === 'multi') {
+      buildMultiSeries(seriesList, todayKey);
+    } else {
+    seriesList.push({
       name: '在店人数', type: 'line', smooth: true, showSymbol: valid.length < 60,
       data: valid.map(function (r) { return [new Date(r.ts).getTime(), r.count]; }),
       lineStyle: { width: 2.5, color: '#10b981' },
@@ -180,9 +187,9 @@
       markPoint: {
         symbolSize: 50, itemStyle: { color: '#10b981' },
         label: { color: '#fff', fontSize: 12 },
-        data: valid.length ? [{ type: 'max', name: '峰值' }] : []
-      }
-    }];
+          data: valid.length ? [{ type: 'max', name: '峰值' }] : []
+        }
+      });
     if (compareOn && range === 'today') {
       var t0 = startOfToday();
       var prev = recent.filter(function (r) {
@@ -226,9 +233,10 @@
         });
       }
     }
+    }
     chart1.setOption({
       grid: { left: 44, right: 24, top: 42, bottom: 44 },
-      legend: { show: seriesList.length > 1, top: 0, right: 8, itemWidth: 20, textStyle: { fontSize: 11 } },
+      legend: { show: seriesList.length > 1, top: 0, right: 8, type: 'scroll', itemWidth: 20, textStyle: { fontSize: 11 } },
       tooltip: {
         trigger: 'axis',
         formatter: function (ps) {
@@ -242,8 +250,8 @@
       },
       xAxis: {
         type: 'time', axisLabel: { hideOverlap: true },
-        min: (range === 'today') ? startOfToday() : null,
-        max: (range === 'today') ? startOfToday() + 24 * 3600e3 : null
+        min: fixedDay ? new Date(todayKey + 'T00:00:00+08:00').getTime() : null,
+        max: fixedDay ? new Date(todayKey + 'T00:00:00+08:00').getTime() + 24 * 3600e3 : null
       },
       yAxis: { type: 'value', minInterval: 1 },
       dataZoom: [{ type: 'inside' }],
@@ -277,6 +285,37 @@
     }, true);
 
     renderHeat();
+  }
+
+  function dateKeyOf(d) {
+    return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
+  }
+
+  function buildMultiSeries(seriesList, todayKey) {
+    var groups = {};
+    recent.forEach(function (r) {
+      if (r.count == null) return;
+      var day = r.ts.slice(0, 10);
+      (groups[day] = groups[day] || []).push(r);
+    });
+    var dayKeys = Object.keys(groups).sort().slice(-7); // 最近 7 天
+    var palette = ['#3b82f6', '#8b5cf6', '#ec4899', '#f59e0b', '#06b6d4', '#84cc16', '#ef4444'];
+    var t0m = new Date(todayKey + 'T00:00:00+08:00').getTime();
+    dayKeys.forEach(function (day, i) {
+      var ds = new Date(day + 'T00:00:00+08:00').getTime();
+      var isToday = day === todayKey;
+      var color = isToday ? '#10b981' : palette[i % palette.length];
+      var wd = '日一二三四五六'.charAt(new Date(day + 'T00:00:00+08:00').getDay());
+      seriesList.push({
+        name: day.slice(5) + ' 周' + wd,
+        type: 'line', smooth: true, showSymbol: false,
+        data: groups[day].map(function (r) {
+          return [t0m + (new Date(r.ts).getTime() - ds), r.count];
+        }),
+        lineStyle: { width: isToday ? 2.5 : 1.8, color: color },
+        itemStyle: { color: color }
+      });
+    });
   }
 
   function renderHeat() {
