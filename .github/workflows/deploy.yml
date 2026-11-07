@@ -4,11 +4,14 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+  schedule:
+    - cron: "*/30 * * * *" # 兜底:即使触发链出问题,网页最多滞后 30 分钟
 
 permissions:
   contents: read
   pages: write
   id-token: write
+  actions: write
 
 concurrency:
   group: pages
@@ -28,3 +31,17 @@ jobs:
           path: .
       - id: deployment
         uses: actions/deploy-pages@v4
+
+      - name: 自检:记录链断链自动重燃(超过 20 分钟无新记录时)
+        run: |
+          LAST=$(gh run list --repo Yaaaccc/gym --workflow poll.yml --limit 1 --json createdAt --jq '.[0].createdAt')
+          AGE=$(( $(date +%s) - $(date -d "$LAST" +%s) ))
+          echo "最近一轮记录开始于 $AGE 秒前"
+          if [ "$AGE" -gt 1200 ]; then
+            echo "断链!重新点燃记录链"
+            gh workflow run poll.yml --repo Yaaaccc/gym --ref main
+          else
+            echo "记录链正常"
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
