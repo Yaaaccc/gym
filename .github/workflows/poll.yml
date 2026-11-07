@@ -33,11 +33,15 @@ jobs:
           git add data/
           git diff --cached --quiet && echo "no change" || (git commit -m "记录 $(TZ=Asia/Shanghai date '+%F %H:%M')" && git push)
 
-      - name: 触发下一轮(保证约 5 分钟一轮,不依赖定时器)
+      - name: 触发下一轮 + 刷新网页(重试 3 次,防偶发失败断链)
         if: always()
         run: |
           REMAIN=$((JOB_START + 270 - $(date +%s)))
           if [ "$REMAIN" -gt 0 ]; then sleep "$REMAIN"; fi
-          gh workflow run poll.yml --repo Yaaaccc/gym --ref main
+          for i in 1 2 3; do
+            if gh workflow run poll.yml --repo Yaaaccc/gym --ref main; then break; fi
+            echo "第 $i 次触发失败,20 秒后重试"; sleep 20
+          done
+          gh workflow run deploy.yml --repo Yaaaccc/gym --ref main || echo "部署触发失败,交给定时兜底"
         env:
           GH_TOKEN: ${{ github.token }}
