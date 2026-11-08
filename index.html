@@ -140,6 +140,19 @@
     }
     return pad(d.getHours()) + ':' + pad(d.getMinutes());
   }
+  function nearestVal(data, x, tol) {
+    // data: 按 x 升序的 [[x, v], ...];返回距 x 最近的值,超出 tol 返回 null
+    if (!data || !data.length) return null;
+    var a = 0, b = data.length - 1, best = -1, bd = Infinity;
+    while (a <= b) {
+      var m = (a + b) >> 1;
+      var dx = Math.abs(data[m][0] - x);
+      if (dx < bd) { bd = dx; best = m; }
+      if (data[m][0] < x) a = m + 1; else b = m - 1;
+    }
+    if (best < 0 || bd > tol) return null;
+    return data[best][1];
+  }
   function startOfToday() { var d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime(); }
 
   function loadRecent() {
@@ -254,7 +267,8 @@
           name: '历史平均·预测', type: 'line', smooth: true, showSymbol: false,
           data: pred,
           lineStyle: { width: 2, color: '#f59e0b', type: 'dotted' },
-          itemStyle: { color: '#f59e0b' }
+          itemStyle: { color: '#f59e0b' },
+          _tol: 16 * 60e3 // 预测线 30 分钟一个点,放宽最近值容差
         });
       }
     }
@@ -286,16 +300,13 @@
         trigger: 'axis',
         formatter: function (ps) {
           if (!ps.length) return '';
-          var html = [];
-          for (var i = 0; i < ps.length; i++) {
-            var t = ps[i].value[0];
-            var name = ps[i].seriesName;
-            var when;
-            if (name === '上周同期') { when = fmt(new Date(t - 7 * 864e5)); }
-            else if (/^\d{2}-\d{2}/.test(name)) { when = name + ' ' + pad(new Date(t).getHours()) + ':' + pad(new Date(t).getMinutes()); }
-            else { when = fmt(new Date(t)); }
-            if (i === 0) html.push(when);
-            html.push(ps[i].marker + name + ' <b>' + ps[i].value[1] + '</b> 人');
+          var x = ps[0].value[0];
+          var html = [fmt(new Date(x))];
+          for (var i = 0; i < seriesList.length; i++) {
+            var s = seriesList[i];
+            var v = nearestVal(s.data, x, s._tol || 10 * 60e3);
+            var dot = '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + (s.itemStyle ? s.itemStyle.color : '#10b981') + ';margin-right:5px"></span>';
+            html.push(dot + s.name + ': <b>' + (v == null ? '--' : v) + '</b> 人');
           }
           return html.join('<br/>');
         }
