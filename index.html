@@ -27,6 +27,8 @@
   .card.hero .big { font-size: 44px; font-weight: 700; line-height: 1.1; }
   .card.hero .big small { font-size: 16px; font-weight: 400; margin-left: 4px; }
   .card.hero .upd { font-size: 11px; color: rgba(255,255,255,.8); margin-top: 6px; }
+  .card.hero .crowd { margin-top: 8px; font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
+  .card.hero .crowd .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; box-shadow: 0 0 0 2px rgba(255,255,255,.25); }
   .card .mid { font-size: 22px; font-weight: 600; }
   .toolbar { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; align-items: center; }
   .toolbar button {
@@ -60,6 +62,7 @@
       <div class="label">当前在店</div>
       <div class="big"><span id="cur">--</span><small>人</small></div>
       <div class="upd" id="upd">加载中…</div>
+      <div class="crowd" id="crowd" style="display:none"></div>
     </div>
     <div class="card"><div class="label">今日峰值</div><div class="mid" id="peak">--</div></div>
     <div class="card"><div class="label">温度</div><div class="mid" id="temp">--</div></div>
@@ -112,6 +115,16 @@
   var lastLiveOk = 0; // 最近一次实时直读成功的时间
   var compareOn = false; // 是否叠加上周同期曲线
   var avgOn = true; // 是否显示历史同时段平均(预测)曲线
+  var CROWD = [ // 拥挤度阈值:30-50 轻微 / 50-80 中等 / 80+ 极度
+    { min: 80, t: '极度拥挤', lab: '80+ 极度拥挤', dot: '#ef4444', band: 'rgba(239,68,68,.08)', deep: '#b91c1c' },
+    { min: 50, t: '中等拥挤', lab: '50-80 中等拥挤', dot: '#fb923c', band: 'rgba(251,146,60,.08)', deep: '#c2410c' },
+    { min: 30, t: '轻微拥挤', lab: '30-50 轻微拥挤', dot: '#facc15', band: 'rgba(250,204,21,.09)', deep: '#a16207' }
+  ];
+  function crowdLevel(n) {
+    if (n == null) return { t: '', dot: '' };
+    for (var i = 0; i < CROWD.length; i++) if (n >= CROWD[i].min) return CROWD[i];
+    return { t: '舒适', dot: '#34d399' };
+  }
 
   function pad(n) { return String(n).padStart(2, '0'); }
   function fmt(d) {
@@ -166,9 +179,14 @@
       $('#upd').textContent = '更新于 ' + fmt(new Date(last.ts));
       $('#temp').textContent = last.temp != null ? last.temp + '℃' : '--';
       $('#hum').textContent = last.humidity != null ? last.humidity + '%' : '--';
+      var cl = crowdLevel(last.count);
+      var c = $('#crowd');
+      c.style.display = 'flex';
+      c.innerHTML = '<span class="dot" style="background:' + cl.dot + '"></span>' + cl.t;
     } else {
       $('#cur').textContent = '--';
       $('#upd').textContent = '暂无数据';
+      $('#crowd').style.display = 'none';
     }
     var todayValid = recent.filter(function (r) { return r.count != null && new Date(r.ts).getTime() >= startOfToday(); });
     $('#peak').textContent = todayValid.length ? Math.max.apply(null, todayValid.map(function (r) { return r.count; })) + ' 人' : '--';
@@ -240,6 +258,26 @@
         });
       }
     }
+    }
+
+    // 拥挤度参考带(数据达到该区间才显示对应色带)
+    var dataMax = 0;
+    seriesList.forEach(function (s) {
+      s.data.forEach(function (p) { if (p[1] > dataMax) dataMax = p[1]; });
+    });
+    if (seriesList.length) {
+      var areas = [];
+      for (var ci = 0; ci < CROWD.length; ci++) {
+        var lo = CROWD[ci].min;
+        var hi = ci === 0 ? 140 : CROWD[ci - 1].min;
+        if (dataMax >= lo) {
+          areas.push([
+            { yAxis: lo, itemStyle: { color: CROWD[ci].band }, label: { position: 'insideTopRight', color: CROWD[ci].deep, fontSize: 10, formatter: CROWD[ci].lab } },
+            { yAxis: hi }
+          ]);
+        }
+      }
+      seriesList[0].markArea = { silent: true, data: areas };
     }
     chart1.setOption({
       grid: { left: 44, right: 24, top: 42, bottom: 44 },
@@ -343,14 +381,13 @@
       sum[k] = (sum[k] || 0) + r.count;
       cnt[k] = (cnt[k] || 0) + 1;
     });
-    var data = [], maxv = 0;
+    var data = [];
     for (var h = 0; h < 24; h++) {
       for (var row = 0; row < 7; row++) {
         var k = row + ':' + h;
         if (cnt[k]) {
           var avg = Math.round(sum[k] / cnt[k] * 10) / 10;
           data.push([h, row, avg]);
-          if (avg > maxv) maxv = avg;
         }
       }
     }
@@ -360,7 +397,7 @@
       tooltip: {
         formatter: function (p) {
           var n = cnt[p.value[1] + ':' + p.value[0]] || 0;
-          return days[p.value[1]] + ' ' + p.value[0] + ' 点<br/>平均在店 <b>' + p.value[2] + '</b> 人(样本 ' + n + ' 次)';
+          return days[p.value[1]] + ' ' + p.value[0] + ' 点<br/>平均在店 <b>' + p.value[2] + '</b> 人 · ' + crowdLevel(p.value[2]).t + '(样本 ' + n + ' 次)';
         }
       },
       xAxis: {
@@ -370,10 +407,16 @@
       },
       yAxis: { type: 'category', data: days },
       visualMap: {
-        min: 0, max: maxv || 10, calculable: false,
+        type: 'piecewise',
         orient: 'horizontal', left: 'center', bottom: 0,
-        text: ['挤', '空'], textStyle: { fontSize: 11 },
-        inRange: { color: ['#e8f5e9', '#ffd54f', '#e53935'] }
+        itemWidth: 14, itemHeight: 9,
+        textStyle: { fontSize: 11 },
+        pieces: [
+          { gt: 80, label: '极度拥挤 80+', color: '#e53935' },
+          { gt: 50, lte: 80, label: '中等拥挤 50-80', color: '#fb923c' },
+          { gt: 30, lte: 50, label: '轻微拥挤 30-50', color: '#ffd54f' },
+          { lte: 30, label: '舒适 0-30', color: '#a5d6a7' }
+        ]
       },
       series: [{
         type: 'heatmap',
@@ -399,6 +442,10 @@
       $('#upd').textContent = '实时 · 刚刚更新';
       if (env.temperature != null) $('#temp').textContent = env.temperature + '℃';
       if (env.humidity != null) $('#hum').textContent = env.humidity + '%';
+      var cl = crowdLevel(p.data.occupancyCount);
+      var c = $('#crowd');
+      c.style.display = 'flex';
+      c.innerHTML = '<span class="dot" style="background:' + cl.dot + '"></span>' + cl.t;
       lastLiveOk = Date.now();
     }).catch(function () {});
   }
