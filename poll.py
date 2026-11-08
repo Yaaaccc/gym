@@ -70,12 +70,20 @@ def build_recent():
                 if r.get("ts") and r.get("count") is not None:
                     dedup[r["ts"]] = r
     kept = []
+    seen = set()
     for ts in sorted(dedup):
         dt = datetime.fromisoformat(ts)
         if dt >= today_start:
-            kept.append(dedup[ts])                 # 今天:全量(30 秒粒度)
-        elif dt >= cutoff and dt.minute % 5 == 0:  # 更早:按 5 分钟网格抽稀
-            kept.append(dedup[ts])
+            kept.append(dedup[ts])  # 今天:全量(30 秒粒度)
+            continue
+        if dt < cutoff:
+            continue  # 超出保留天数
+        day_start = dt.replace(hour=0, minute=0, second=0, microsecond=0)
+        key = (ts[:10], int((dt - day_start).total_seconds() // 300))
+        if key in seen:  # 更早:每 5 分钟桶只留第一条(与分钟数字无关)
+            continue
+        seen.add(key)
+        kept.append(dedup[ts])
     return kept
 
 
