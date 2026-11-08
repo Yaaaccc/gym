@@ -2,8 +2,9 @@
 """定时请求虾健健门店实时状态接口。
 
 GitHub Actions 定时器最快只能 5 分钟一次,所以每次任务内连续记录多条:
-- data/history.jsonl:全量追加(约每 30 秒一条)
-- data/recent.json:网页用。今天保留全量,更早的按 5 分钟抽稀,最多保留 30 天
+- data/history.jsonl:全量追加(约每 30 秒一条),唯一的完整档案
+- data/recent.json:网页用,**每次运行都从 history.jsonl 重新生成**(幂等):
+  今天保留全量,更早的按 5 分钟抽稀,最多保留 KEEP_DAYS 天
 """
 import json
 import os
@@ -50,33 +51,35 @@ def to_record(data):
     }
 
 
-def trim_recent(records):
-    """今天保留全量;更早的每 10 条取 1 条(约 5 分钟一条);超过 KEEP_DAYS 天丢弃。"""
+def build_recent():
+    """从 history.jsonl 重建 recent.json 内容(幂等:结果只取决于档案)。"""
     now = datetime.now(TZ)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     cutoff = today_start - timedelta(days=KEEP_DAYS - 1)
     dedup = {}
-    for r in records:
-        dedup[r["ts"]] = r
+    if os.path.exists(HISTORY):
+        with open(HISTORY, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    r = json.loads(line)
+                except Exception:
+                    continue
+                if r.get("ts") and r.get("count") is not None:
+                    dedup[r["ts"]] = r
     kept = []
-    for i, ts in enumerate(sorted(dedup)):
+    for ts in sorted(dedup):
         dt = datetime.fromisoformat(ts)
         if dt >= today_start:
-            kept.append(dedup[ts])            # 今天:全量
-        elif dt >= cutoff and i % 10 == 0:
-            kept.append(dedup[ts])            # 更早:约 5 分钟一条
+            kept.append(dedup[ts])                 # 今天:全量(30 秒粒度)
+        elif dt >= cutoff and dt.minute % 5 == 0:  # 更早:按 5 分钟网格抽稀
+            kept.append(dedup[ts])
     return kept
 
 
 def main():
-    records = []
-    if os.path.exists(RECENT):
-        try:
-            with open(RECENT, encoding="utf-8") as f:
-                records = json.load(f)
-        except Exception:
-            records = []
-
     new = []
     for i in range(TICKS):
         tick_start = time.monotonic()
@@ -94,12 +97,11 @@ def main():
         for r in new:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
 
-    records.extend(new)
-    records = trim_recent(records)
+    records = build_recent()
     with open(RECENT, "w", encoding="utf-8") as f:
         json.dump(records, f, ensure_ascii=False)
 
-    print("recorded %d, last:" % len(new), new[-1])
+    print("recorded %d, recent total %d, last:" % (len(new), len(records)), new[-1])
 
 
 if __name__ == "__main__":
