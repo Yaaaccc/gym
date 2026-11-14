@@ -36,6 +36,8 @@
     padding: 6px 16px; font-size: 13px; cursor: pointer;
   }
   .toolbar button.active { background: #1f2937; color: #fff; border-color: #1f2937; }
+  #datePick { border: 1px solid #d1d5db; background: #fff; border-radius: 999px; padding: 5px 10px; font-size: 13px; color: #374151; }
+  #datePick.active { border-color: #1f2937; font-weight: 600; }
   .toolbar .hint { font-size: 12px; color: #9ca3af; margin-left: auto; }
   .panel { background: #fff; border-radius: 14px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.06); margin-bottom: 14px; }
   .panel h3 { font-size: 14px; color: #374151; margin-bottom: 8px; }
@@ -64,7 +66,7 @@
       <div class="upd" id="upd">加载中…</div>
       <div class="crowd" id="crowd" style="display:none"></div>
     </div>
-    <div class="card"><div class="label">今日峰值</div><div class="mid" id="peak">--</div></div>
+    <div class="card"><div class="label" id="peakLabel">今日峰值</div><div class="mid" id="peak">--</div></div>
     <div class="card"><div class="label">温度</div><div class="mid" id="temp">--</div></div>
     <div class="card"><div class="label">湿度</div><div class="mid" id="hum">--</div></div>
   </div>
@@ -75,6 +77,7 @@
     <button data-range="30d">近 30 天</button>
     <button data-range="all">全部</button>
     <button data-range="multi">多日对比</button>
+    <input type="date" id="datePick" title="选一个日期,看当天的曲线">
     <button id="cmpBtn">对比上周</button>
     <button id="avgBtn" class="active">历史平均·预测</button>
     <span class="hint">当前人数实时直读 · 曲线每 2 分钟更新</span>
@@ -115,6 +118,7 @@
   var lastLiveOk = 0; // 最近一次实时直读成功的时间
   var compareOn = false; // 是否叠加上周同期曲线
   var avgOn = true; // 是否显示历史同时段平均(预测)曲线
+  var dateSel = ''; // 日期视图选中的日期(YYYY-MM-DD)
   var CROWD = [ // 拥挤度阈值:30-50 轻微 / 50-80 中等 / 80+ 极度
     { min: 80, t: '极度拥挤', lab: '80+ 极度拥挤', dot: '#ef4444', band: 'rgba(239,68,68,.08)', deep: '#b91c1c' },
     { min: 50, t: '中等拥挤', lab: '50-80 中等拥挤', dot: '#fb923c', band: 'rgba(251,146,60,.08)', deep: '#c2410c' },
@@ -174,6 +178,14 @@
   }
 
   function currentData() {
+    if (range === 'date') {
+      // 优先 recent(最新且覆盖最近 30 天),该日期查不到再查完整档案
+      var dayRecs = recent.filter(function (r) { return r.ts.slice(0, 10) === dateSel; });
+      if (!dayRecs.length && full) {
+        dayRecs = full.filter(function (r) { return r.ts.slice(0, 10) === dateSel; });
+      }
+      return dayRecs;
+    }
     if (range === 'all') return full || recent;
     if (range === 'today') return recent.filter(function (r) { return new Date(r.ts).getTime() >= startOfToday(); });
     var days = range === '7d' ? 7 : 30;
@@ -202,7 +214,13 @@
       $('#crowd').style.display = 'none';
     }
     var todayValid = recent.filter(function (r) { return r.count != null && new Date(r.ts).getTime() >= startOfToday(); });
-    $('#peak').textContent = todayValid.length ? Math.max.apply(null, todayValid.map(function (r) { return r.count; })) + ' 人' : '--';
+    if (range === 'date') {
+      $('#peakLabel').textContent = '当日峰值';
+      $('#peak').textContent = valid.length ? Math.max.apply(null, valid.map(function (r) { return r.count; })) + ' 人' : '--';
+    } else {
+      $('#peakLabel').textContent = '今日峰值';
+      $('#peak').textContent = todayValid.length ? Math.max.apply(null, todayValid.map(function (r) { return r.count; })) + ' 人' : '--';
+    }
 
     $('#empty').style.display = valid.length ? 'none' : 'block';
 
@@ -212,9 +230,25 @@
     ]);
     var seriesList = [];
     var todayKey = dateKeyOf(new Date());
-    var fixedDay = (range === 'today' || range === 'multi');
+    var fixedDay = (range === 'today' || range === 'multi' || range === 'date');
+    var fixedKey = (range === 'date') ? dateSel : todayKey;
     if (range === 'multi') {
       buildMultiSeries(seriesList, todayKey);
+    } else if (range === 'date') {
+      var wd = '日一二三四五六'.charAt(new Date(dateSel + 'T00:00:00+08:00').getDay());
+      seriesList.push({
+        name: dateSel.slice(5) + ' 周' + wd,
+        type: 'line', smooth: true, showSymbol: valid.length < 60,
+        data: valid.map(function (r) { return [new Date(r.ts).getTime(), r.count]; }),
+        lineStyle: { width: 2.5, color: '#10b981' },
+        itemStyle: { color: '#10b981' },
+        areaStyle: { color: areaColor },
+        markPoint: {
+          symbolSize: 50, itemStyle: { color: '#10b981' },
+          label: { color: '#fff', fontSize: 12 },
+          data: valid.length ? [{ type: 'max', name: '峰值' }] : []
+        }
+      });
     } else {
     seriesList.push({
       name: '在店人数', type: 'line', smooth: true, showSymbol: valid.length < 60,
@@ -313,8 +347,8 @@
       },
       xAxis: {
         type: 'time', axisLabel: { hideOverlap: true, formatter: dayAxisLabel },
-        min: fixedDay ? new Date(todayKey + 'T00:00:00+08:00').getTime() : null,
-        max: fixedDay ? new Date(todayKey + 'T00:00:00+08:00').getTime() + 24 * 3600e3 : null
+        min: fixedDay ? new Date(fixedKey + 'T00:00:00+08:00').getTime() : null,
+        max: fixedDay ? new Date(fixedKey + 'T00:00:00+08:00').getTime() + 24 * 3600e3 : null
       },
       yAxis: { type: 'value', minInterval: 1 },
       dataZoom: [{ type: 'inside' }],
@@ -348,6 +382,16 @@
     }, true);
 
     renderHeat();
+    updateDateBounds();
+  }
+
+  function updateDateBounds() {
+    var dp = document.getElementById('datePick');
+    var src = full || recent;
+    if (!src.length) return;
+    var days = src.map(function (r) { return r.ts.slice(0, 10); }).sort();
+    dp.min = days[0];
+    dp.max = days[days.length - 1];
   }
 
   function dateKeyOf(d) {
@@ -478,8 +522,18 @@
     }
     document.querySelectorAll('#ranges button[data-range]').forEach(function (b) { b.classList.remove('active'); });
     btn.classList.add('active');
+    document.getElementById('datePick').classList.remove('active');
     range = btn.dataset.range;
     if (range === 'all') { loadFull().then(render); } else { render(); }
+  });
+
+  document.getElementById('datePick').addEventListener('change', function () {
+    dateSel = this.value;
+    if (!dateSel) return;
+    document.querySelectorAll('#ranges button[data-range]').forEach(function (b) { b.classList.remove('active'); });
+    this.classList.add('active');
+    range = 'date';
+    loadFull().then(render); // 档案里有全部历史,选 30 天前的日期也能看
   });
 
   window.addEventListener('resize', function () { chart1.resize(); chart2.resize(); heatChart.resize(); });
